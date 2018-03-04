@@ -1,0 +1,77 @@
+import requests 
+from bs4 import BeautifulSoup
+import urllib.parse
+import re
+from selenium import webdriver
+import csv
+
+csvfile = open('PTT_partime_job_email.csv', 'w', encoding = 'utf-8-sig')
+csvwriter = csv.writer(csvfile)
+
+#啟動 Webdriver
+driver = webdriver.PhantomJS(executable_path="C:\Program Files\Python36\Scripts\phantomjs.exe")
+
+# Email 正則表達式
+regex = re.compile('[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+
+#Web PTT 首頁
+domain_url = "https://www.ptt.cc"
+
+#網頁版最新頁
+index_url = "https://www.ptt.cc/bbs/part-time/index.html"
+
+#刪除文章連結
+Not_Exist = BeautifulSoup('<a>本文已被刪除</a>', 'lxml').a
+
+#存放列表頁的 list
+index_url_list = list()
+post_url_list = list()
+full_post_url_list = list()
+
+#獲得右上方上一頁連結
+def get_next_links(url):
+    respone = requests.get(url)
+    respone_soup = BeautifulSoup(respone.text,'lxml')
+    for post_block in respone_soup.find_all('div', 'r-ent'):
+        block_info = post_block.find('div', 'title').find('a') or Not_Exist #確認是否被刪除
+        post_link = block_info.get("href")
+        post_url_list.append(post_link)
+    next_link = respone_soup.find('div', 'btn-group-paging').find_all('a', 'btn')[1].get('href')
+    
+    return post_url_list,next_link
+
+page_url = index_url
+
+# range(num) , num = 爬幾頁
+for i in range(999):
+    post_link,next_link = get_next_links(page_url)
+    page_url = urllib.parse.urljoin(index_url,next_link)
+    index_url_list.append(next_link)
+
+for post_link in post_url_list:
+    links = urllib.parse.urljoin(domain_url,post_link)
+    if links != domain_url:
+        full_post_url_list.append(links)
+for post in full_post_url_list:
+    driver.get(post)
+    post_soup = BeautifulSoup(driver.page_source, 'lxml')
+
+    #爬取網頁版最上方區塊
+    meta_info = post_soup.findAll("span",{"class":"article-meta-value"})
+    
+    #爬取文章內文
+    if post_soup.find("div",{"class":"bbs-screen bbs-content"})!="None":
+        post = post_soup.find("div",{"class":"bbs-screen bbs-content"}).text
+
+    #從上方區塊撈取標題、發文時間
+    try:
+        if meta_info[-2].text.find("[公告]") != False:
+            post_title = meta_info[-2].text #標題
+            post_time = meta_info[-1].text #發文時間    
+            if len(regex.findall(post)) >0:
+                emails = regex.findall(post)[0] #聯絡人信箱
+            else:
+                emails = "None"
+            csvwriter.writerow([post_title,post_time,emails])
+    except IndexError:
+        print("error")
